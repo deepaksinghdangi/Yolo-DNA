@@ -17,177 +17,144 @@ import imghdr
 from PIL import Image, ImageDraw, ImageFont
 import random
 from keras import backend as K
+import math
 
 classes_name =  ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train","tvmonitor"]
 
-def preprocess_image(img_path, model_image_size):
-    image_type = imghdr.what(img_path)
-    image = Image.open(img_path)
-    resized_image = image.resize(tuple(reversed(model_image_size)), Image.BICUBIC)
-    image_data = np.array(resized_image, dtype='float32')
-    image_data /= 255.
-    image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
-    return image, image_data
+def sigmoid(x):
+  return 1 / (1 + np.exp(-x))
 
-def generate_colors(class_names):
+# Interpret network output (7x7x30) to bb coordinates (long process)
+def InterpretPredictions(predicts):
+  p_classes = predicts[0, :, :, 0:20] # conditional class probabilitites -> 7x7x20
+  C = predicts[0, :, :, 20:22]        # individual box confidence predictions -> 7x7x2 
+  coordinate = predicts[0, :, :, 22:] # class coordinates -> 7x7x8
+  coordinate = np.reshape(coordinate, (7, 7, 2, 4)) # BoundingBox1 and BoundingBox2 coordinates
+  p_classes = np.reshape(p_classes, (7, 7, 1, 20))
+  C = np.reshape(C, (7, 7, 2, 1))
+ 
+  # multiply class probabilities with confidence matrix
+  P = C * p_classes
 
-  hsv_tuples = [(x / len(class_names), 1., 1.) for x in range(len(class_names))]
-  colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
-  colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
-  random.seed(10101)  # Fixed seed for consistent colors across runs.
-  random.shuffle(colors)  # Shuffle colors to decorrelate adjacent classes.
-  random.seed(None)  # Reset seed to default.
-  return colors
+  P = sigmoid(P)  # normalize them into probabilities
 
+  scores = P[P>0.52]
+  print("scores shape: "+str(scores.shape))
+  find_probs = np.where(P>0.52) #  Find the most cells witht Probabilities > Threshold
+  #print(find_probs)
+  find_probs_np = []
 
-def draw_boxes(image, out_scores, out_boxes, out_classes, class_names, colors):
-    
-  font = ImageFont.truetype(font='font/FiraMono-Medium.otf',size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
-  thickness = (image.size[0] + image.size[1]) // 300
+  # Initialize labels to return
+  # 20: max_objects_per_image
+  labels = [[0, 0, 0, 0, 0]] * 20
+  object_num = 0
 
-  for i, c in reversed(list(enumerate(out_classes))):
-    predicted_class = class_names[c]
-    box = out_boxes[i]
-    score = out_scores[i]
+  # Read the elements
+  for i in range(len(find_probs)):  
+    find_probs_np.append(find_probs[i])
 
-    label = '{} {:.2f}'.format(predicted_class, score)
-    draw = ImageDraw.Draw(image)
-    label_size = draw.textsize(label, font)
-    top, left, bottom, right = box
-    top = max(0, np.floor(top + 0.5).astype('int32'))
-    left = max(0, np.floor(left + 0.5).astype('int32'))
-    bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
-    right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-    print(label, (left, top), (right, bottom))
-    if top - label_size[1] >= 0:
-        text_origin = np.array([left, top - label_size[1]])
-    else:
-        text_origin = np.array([left, top + 1])
-    # My kingdom for a good redistributable image drawing library.
-    for i in range(thickness):
-        draw.rectangle([left + i, top + i, right - i, bottom - i], outline=colors[c])
-    draw.rectangle([tuple(text_origin), tuple(text_origin + label_size)], fill=colors[c])
-    draw.text(text_origin, label, fill=(0, 0, 0), font=font)
-    del draw
+  for j in range(0, len(find_probs_np[0])):
 
-def process_predicts(predicts,sess):
-  box_class_probs = predicts[0, :, :, 0:20] #p_Classes
-  box_confidence = predicts[0, :, :, 20:22] #c
-    
-  boxes = predicts[0, :, :, 22:] #coordinates
+    myindex=[] # myindex is for all the objects in the image
 
-  box_class_probs = np.reshape(box_class_probs, (7, 7, 1, 20))
-  box_confidence = np.reshape(box_confidence, (7, 7, 2, 1))
-  boxes = np.reshape(boxes,(7,7,2,4))
+    for i in range(0, len(find_probs_np)):         
+      myindex.append(find_probs_np[i][j])
 
-  #box score 7x7x2x20
-  
-  #print(sess.run(box_confidence))
-  #print(sess.run(box_class_probs))
-  box_scores = box_confidence * box_class_probs #P
-  #print(sess.run(box_scores))
-  #print(box_scores.shape)
-  
-  #print P[5,1, 0, :]
+    index = np.argmax(P) # Get the elements for the class with the highest probabilities (this returns only one object)
+    index = np.unravel_index(index, P.shape)
 
- # DNA changes
+    # Get the class number
+    class_num = myindex[3]
 
-  box_classes = K.argmax(box_scores,axis=-1)
-  #print(box_classes.shape)
-  #print(box_classes[1][1][0],box_classes[1][1][1])
+    # Get the coordinates 
+    max_coordinate = coordinate[myindex[0], myindex[1], myindex[2], :]
 
-  box_class_scores = K.max(box_scores,axis=-1,keepdims=False) #7x7x2
-  #print(sess.run(box_class_scores))
-    
-  #print(box_class_scores[1][1][0])
+    # Get x,y center of the BB
+    xcenter = max_coordinate[0]
+    ycenter = max_coordinate[1]
+    w = max_coordinate[2]
+    h = max_coordinate[3]
+    xcenter = (myindex[1] + xcenter) * (448/7.0)
+    ycenter = (myindex[0] + ycenter) * (448/7.0)
 
-  filtering_mask = box_class_scores >= 0.15
-  #print(sess.run(filtering_mask))
-    
-  scores = tf.boolean_mask(box_class_scores,filtering_mask)
-  #print(sess.run(scores))
-  #print(boxes)
-  boxes = tf.boolean_mask(boxes,filtering_mask)
-  #print(boxes.shape)
-  classes = tf.boolean_mask(box_classes,filtering_mask)
-  #print(classes.shape)
-  return scores, classes, boxes
- # DNA changes ends
+    w = w * 448
+    h = h * 448
 
-   #old
-  #index = np.argmax(box_scores)
-  #print(index.shape)
-  #print(index)
+    # Convert them to BB coordinates (same as annotations)
+    xmin = xcenter - w/2.0
+    ymin = ycenter - h/2.0
+    xmax = xmin + w
+    ymax = ymin + h
 
-  #index = np.unravel_index(index, box_scores.shape)
+    # Append to the final labels
+    labels[object_num] = [xmin, ymin, xmax, ymax, class_num]
+    object_num += 1
+    if object_num >= 20:
+          break
+  return labels, object_num, scores
 
-  #class_num = index[3]
+#  Felzenszwalb et al.
+def non_max_suppression(boxes, overlapThresh):
+    # if there are no boxes, return an empty list
+    if len(boxes) == 0:
+        return []
 
-  #boxes = np.reshape(boxes, (7, 7, 2, 4))
+    # initialize the list of picked indexes
+    pick = []
 
-"""
-  max_coordinate = boxes[index[0], index[1], index[2], :]
+    # grab the coordinates of the bounding boxes
+    x1 = boxes[:,0]
+    y1 = boxes[:,1]
+    x2 = boxes[:,2]
+    y2 = boxes[:,3]
 
-  xcenter = max_coordinate[0]
-  ycenter = max_coordinate[1]
-  w = max_coordinate[2]
-  h = max_coordinate[3]
+    # compute the area of the bounding boxes and sort the bounding
+    # boxes by the bottom-right y-coordinate of the bounding box
+    area = (x2 - x1 + 1) * (y2 - y1 + 1)
+    idxs = np.argsort(y2)
 
-  xcenter = (index[1] + xcenter) * (448/7.0)
-  ycenter = (index[0] + ycenter) * (448/7.0)
+    # keep looping while some indexes still remain in the indexes
+    # list
+    while len(idxs) > 0:
+        # grab the last index in the indexes list, add the index
+        # value to the list of picked indexes, then initialize
+        # the suppression list (i.e. indexes that will be deleted)
+        # using the last index
+        last = len(idxs) - 1
+        i = idxs[last]
+        pick.append(i)
+        suppress = [last]
+        # loop over all indexes in the indexes list
+        for pos in range(0, last):
+            # grab the current index
+            j = idxs[pos]
+            # find the largest (x, y) coordinates for the start of
+            # the bounding box and the smallest (x, y) coordinates
+            # for the end of the bounding box
+            xx1 = max(x1[i], x1[j])
+            yy1 = max(y1[i], y1[j])
+            xx2 = min(x2[i], x2[j])
+            yy2 = min(y2[i], y2[j])
 
-  w = w * 448
-  h = h * 448
+            # compute the width and height of the bounding box
+            w = max(0, xx2 - xx1 + 1)
+            h = max(0, yy2 - yy1 + 1)
 
-  xmin = xcenter - w/2.0
-  ymin = ycenter - h/2.0
+            # compute the ratio of overlap between the computed
+            # bounding box and the bounding box in the area list
+            overlap = float(w * h) / area[j]
 
-  xmax = xmin + w
-  ymax = ymin + h
+            # if there is sufficient overlap, suppress the
+            # current bounding box
+            if overlap > overlapThresh:
+                suppress.append(pos)
 
-  #f.close()
+        # delete all indexes from the index list that are in the
+        # suppression list
+        idxs = np.delete(idxs, suppress)
 
-  return xmin, ymin, xmax, ymax, class_num
-"""
-
-def draw(boxes,classes):
-  '''
-  Arguments:
-      boxes : [?,4]
-      classes : [?]
-  '''
-  print("3")
-  print(boxes)
-  print(classes)
-  cell_no = 0
-  for cell in boxes:
-      print("4")
-      
-      max_coordinate = [cell[0], cell[1], cell[2], cell[3]]
-
-      xcenter = max_coordinate[0]
-      ycenter = max_coordinate[1]
-      w = max_coordinate[2]
-      h = max_coordinate[3]
-
-      xcenter = (cell[1] + xcenter) * (448/7.0)
-      ycenter = (cell[0] + ycenter) * (448/7.0)
-
-      w = w * 448
-      h = h * 448
-
-      xmin = xcenter - w/2.0
-      ymin = ycenter - h/2.0
-
-      xmax = xmin + w
-      ymax = ymin + h
-      
-      class_name = classes_name[classes[cell_no]]
-      print("classes_name:" + class_name)
-      cv2.rectangle(resized_img, (int(xmin), int(ymin)), (int(xmax), int(ymax)), (0, 0, 255))
-      cv2.putText(resized_img, class_name, (int(xmin), int(ymin)), 2, 1.5, (0, 0, 255))
-      cv2.imwrite('cat_out.jpg', resized_img)
-      cell_no = cell_no + 1
+    # return only the bounding boxes that were picked
+    return boxes[pick]
 
 common_params = {'image_size': 448, 'num_classes': 20, 
                 'batch_size':1}
@@ -197,40 +164,51 @@ net = YoloTinyNet(common_params, net_params, test=True)
 
 image = tf.placeholder(tf.float32, (1, 448, 448, 3))
 predicts = net.inference(image)
-np_img = cv2.imread('000331.jpg')
+
+sess = tf.Session()
+
+np_img = cv2.imread('cat.jpg')
 resized_img = cv2.resize(np_img, (448, 448))
 np_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
+
+
 np_img = np_img.astype(np.float32)
 
 np_img = np_img / 255.0 * 2 - 1
 np_img = np.reshape(np_img, (1, 448, 448, 3))
 
+saver = tf.train.Saver(net.trainable_collection)
 
-#sess = tf.Session()
-with tf.Session() as sess:
+saver.restore(sess, 'models/pretrain/yolo_tiny.ckpt')
 
-    saver = tf.train.Saver(net.trainable_collection)
-    saver.restore(sess, 'models/pretrain/yolo_tiny.ckpt')
-    np_predict = sess.run(predicts, feed_dict={image: np_img})
+np_predict = sess.run(predicts, feed_dict={image: np_img})
 
-    #print(np_predict)
-#xmin, ymin, xmax, ymax, class_num = process_predicts(np_predict)
-    print("1")
-    scores, classes, boxes  = process_predicts(np_predict,sess)
-    print("2")
-    print(boxes.eval())
-    draw(boxes.eval(),classes.eval())
-    
-#image, image_data = preprocess_image("cat.jpg", model_image_size = (448, 448))
-#colors = generate_colors(classes_name)
-#draw_boxes(image, scores, classes, boxes, classes_name, colors)
+#xmin, ymin, xmax, ymax, class_num= process_predicts(np_predict)
+labels, object_num, scores = InterpretPredictions(np_predict)
 
+print("BEFORE")
+for obj_num,object in enumerate(labels):
+    if obj_num == object_num:
+        break
+    print(object)
+    class_name = classes_name[int(object[4])]
+    print("BEFORE: Printing Classes: ",str(class_name))
 
+objects = non_max_suppression(np.asarray(labels,dtype=np.float32),0.8)
+print(objects)
 
-"""
-class_name = classes_name[class_num]
-cv2.rectangle(resized_img, (int(xmin), int(ymin)), (int(xmax), int(ymax)), (0, 0, 255))
-cv2.putText(resized_img, class_name, (int(xmin), int(ymin)), 2, 1.5, (0, 0, 255))
+for obj_num,object in enumerate(objects):
+    if obj_num == object_num:
+        break
+    class_name = classes_name[int(object[4])]
+    print("Printing Classes: ",str(class_name))
+    cv2.rectangle(resized_img, (int(object[0]), int(object[1])), (int(object[2]), int(object[3])), (0, 0, 255))
+    cv2.putText(resized_img, class_name, (int(object[0]), int(object[1])), 2, 1.5, (0, 0, 255))
+'''
+class_name2 = classes_name[class_num2]
+cv2.rectangle(resized_img, (int(xmin2), int(ymin2)), (int(xmax2), int(ymax2)), (0, 0, 255))
+cv2.putText(resized_img, class_name2, (int(xmin2), int(ymin2)), 2, 1.5, (0, 0, 255))
+'''
 cv2.imwrite('cat_out.jpg', resized_img)
-"""
+
 sess.close()
