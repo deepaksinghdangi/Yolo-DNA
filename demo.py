@@ -26,7 +26,94 @@ from PIL import Image, ImageDraw, ImageFont
 classes_name =  ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train","tvmonitor"]
 
 
+# videos to frames
 
+def video_to_frames(input_loc, output_loc):
+    """Function to extract frames from input video file
+    and save them as separate frames in an output directory.
+    Args:
+        input_loc: Input video file.
+        output_loc: Output directory to save the frames.
+    Returns:
+        None
+    """
+    import time
+    import os
+    try:
+        os.mkdir(output_loc)
+    except OSError:
+        pass
+    # Log the time
+    time_start = time.time()
+    # Start capturing the feed
+    cap = cv2.VideoCapture(input_loc)
+    # Find the number of frames
+    video_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) - 1
+    print ("Number of frames: ", video_length)
+    count = 0
+    print ("Converting video..\n")
+    # Start converting the video
+    while cap.isOpened():
+        # Extract the frame
+        ret, frame = cap.read()
+        # Write the results back to output location.
+        cv2.imwrite(output_loc + "/%#05d.jpg" % (count+1), frame)
+        count = count + 1
+        # If there are no more frames left
+        if (count > (video_length-1)):
+            # Log the time again
+            time_end = time.time()
+            # Release the feed
+            cap.release()
+            # Print stats
+            print ("Done extracting frames.\n%d frames extracted" % count)
+            print ("It took %d seconds forconversion." % (time_end-time_start))
+            break
+
+
+#frames to video
+def frames_to_video():
+    
+    # Arguments
+    dir_path = 'outputframes'
+    ext = 'jpg'
+    output = os.path.join('outvideo','outputvideo.mp4')
+    
+
+    images = []
+    for f in os.listdir(dir_path):
+        #print (f)
+        if f.endswith(ext):
+            images.append(f)
+        
+        # Determine the width and height from the first image
+    image_path = os.path.join(dir_path, images[0])
+    frame = cv2.imread(image_path)
+    cv2.imshow('video',frame)
+    height, width, channels = frame.shape
+
+    # Define the codec and create VideoWriter object
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Be sure to use lower case
+    out = cv2.VideoWriter(output, fourcc, 20.0, (width, height))
+
+    for image in images:
+
+        image_path = os.path.join(dir_path, image)
+        frame = cv2.imread(image_path)
+
+        out.write(frame) # Write out frame to video
+
+        cv2.imshow('video',frame)
+        if (cv2.waitKey(1) & 0xFF) == ord('q'): # Hit `q` to exit
+            break
+
+    # Release everything if job is finished
+    out.release()
+    cv2.destroyAllWindows()
+
+    print("The output video is {}".format(output))
+            
+            
 def read_classes(classes_path):
     with open(classes_path) as f:
         class_names = f.readlines()
@@ -72,7 +159,7 @@ def draw_boxes(image, out_scores, out_boxes, out_classes, class_names, colors):
     font = ImageFont.truetype(font='FiraMono-Medium.otf',size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
     thickness = (image.size[0] + image.size[1]) // 300
    
-    print("Drawing boxes...")
+    #print("Drawing boxes...")
     for i, c in reversed(list(enumerate(out_classes))):
         predicted_class = class_names[c]
         box = out_boxes[i]
@@ -89,7 +176,7 @@ def draw_boxes(image, out_scores, out_boxes, out_classes, class_names, colors):
         left = max(0, np.floor(left + 0.5).astype('int32'))
         bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
         right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-        print(label, (left, top), (right, bottom))
+        #print(label, (left, top), (right, bottom))
 
         if top - label_size[1] >= 0:
             text_origin = np.array([left, top - label_size[1]])
@@ -116,7 +203,7 @@ def InterpretPredictions(predicts,sess):
   p_classes = np.reshape(p_classes, (7, 7, 1, 20))
   C = np.reshape(C, (7, 7, 2, 1))
  
-  threshold = 0.13
+  threshold = 0.07
   # multiply class probabilities with confidence matrix
   P = C * p_classes   #7x7x2x20
   P = sigmoid(P)  # normalize them into probabilities
@@ -127,10 +214,10 @@ def InterpretPredictions(predicts,sess):
   box_classes = K.argmax(box_scores,-1)    #7x7x2
   box_class_scores = K.max(box_scores,-1)  #7x7x2
   
-  print(sess.run(box_classes), sess.run(box_class_scores))
+  #print(sess.run(box_classes), sess.run(box_class_scores))
   filtering_mask = box_class_scores > threshold
   
-  print(sess.run(filtering_mask))
+  #print(sess.run(filtering_mask))
     
   index = tf.where(box_class_scores > threshold) #  Find the most cells witht Probabilities > Threshold
 
@@ -140,13 +227,13 @@ def InterpretPredictions(predicts,sess):
   boxes = tf.boolean_mask(coordinate,filtering_mask)
   classes = tf.boolean_mask(box_classes,filtering_mask)
   
-  print(sess.run(scores),sess.run(boxes),sess.run(classes))
+  #print(sess.run(scores),sess.run(boxes),sess.run(classes))
   # Scale boxes back to original image shape
   #boxes = scale_boxes(boxes, (300.,300.))
 
   max_boxes = 10
   max_boxes_tensor = K.variable(max_boxes, dtype='int32')     # tensor to be used in tf.image.non_max_suppression()
-  print(sess.run(boxes))
+  #print(sess.run(boxes))
   sess.run(tf.variables_initializer([max_boxes_tensor])) # initialize variable max_boxes_tensor
   
   #iou_threshold = 0.5
@@ -183,7 +270,7 @@ def non_max_suppression(boxes, object_num, overlapThresh):
     x2 = boxes[:,2]
     y2 = boxes[:,3]
  
-    print(boxes)
+    #print(boxes)
     
     # compute the area of the bounding boxes and sort the bounding
     # boxes by the bottom-right y-coordinate of the bounding box
@@ -192,28 +279,28 @@ def non_max_suppression(boxes, object_num, overlapThresh):
     idxs = np.argsort(y2)
     # keep looping while some indexes still remain in the indexes
     # list
-    print("AREA:",area) 
-    print("IDXS:",idxs)
+    #print("AREA:",area) 
+    #print("IDXS:",idxs)
     while len(idxs) > 0:
         # grab the last index in the indexes list and add the
         # index value to the list of picked indexes
         last = len(idxs) - 1
         i = idxs[last]
-        print("HELLO",i)
+        #print("HELLO",i)
         pick.append(i)
  
         # find the largest (x, y) coordinates for the start of
         # the bounding box and the smallest (x, y) coordinates
         # for the end of the bounding box
-        print("x1[i]:",x1[i])
-        print("x1[idxs[:last]]:",x1[idxs[:last]])
+        #print("x1[i]:",x1[i])
+        #print("x1[idxs[:last]]:",x1[idxs[:last]])
         
         xx1 = np.maximum(x1[i], x1[idxs[:last]])
         yy1 = np.maximum(y1[i], y1[idxs[:last]])
         xx2 = np.minimum(x2[i], x2[idxs[:last]])
         yy2 = np.minimum(y2[i], y2[idxs[:last]])
         
-        print(idxs[:last])
+        #print(idxs[:last])
  
         # compute the width and height of the bounding box
         w = np.maximum(0, xx2 - xx1 + 1)
@@ -281,40 +368,59 @@ saver = tf.train.Saver(net.trainable_collection)
 
 saver.restore(sess, 'models/pretrain/yolo_tiny.ckpt')
 
-np_img = cv2.imread('cat.jpg')
-resized_img = cv2.resize(np_img, (448, 448))
-np_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
+#input_loc = 'iframes/input.mp4'
+output_loc = 'cars/output_frames'
+#video_to_frames(input_loc, output_loc)
+
+dir_path = 'cars/input_frames'
+ext = 'jpg'
+    #output = os.path.join('outvideo','outputvideo.mp4')
+    
+
+images = []
+for f in os.listdir(dir_path):
+ #print (f)
+    if f.endswith(ext):
+        images.append(f)
+
+for img in images:
+    np_img = cv2.imread(os.path.join(dir_path + '/' + img))
+    resized_img = cv2.resize(np_img, (448, 448))
+    np_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
 
 
-np_img = np_img.astype(np.float32)
+    np_img = np_img.astype(np.float32)
 
-np_img = np_img / 255.0 * 2 - 1
-np_img = np.reshape(np_img, (1, 448, 448, 3))
+    np_img = np_img / 255.0 * 2 - 1
+    np_img = np.reshape(np_img, (1, 448, 448, 3))
 
-np_predict = sess.run(predicts, feed_dict={image: np_img})
+    np_predict = sess.run(predicts, feed_dict={image: np_img})
 
-#xmin, ymin, xmax, ymax, class_num= process_predicts(np_predict)
-out_scores, out_boxes, out_classes, index = InterpretPredictions(np_predict,sess)
+    #xmin, ymin, xmax, ymax, class_num= process_predicts(np_predict)
+    out_scores, out_boxes, out_classes, index = InterpretPredictions(np_predict,sess)
 
-# Print predictions info
-out_scores, out_boxes, out_classes, index = sess.run([out_scores, out_boxes, out_classes, index])
+    # Print predictions info
+    out_scores, out_boxes, out_classes, index = sess.run([out_scores, out_boxes, out_classes, index])
 
-iou_threshold = 0.6
+    iou_threshold = 0.6
 
-labels,object_num = scale(out_scores,out_boxes,out_classes,index)
+    labels,object_num = scale(out_scores,out_boxes,out_classes,index)
 
-labels = non_max_suppression(labels, object_num, iou_threshold)
+    labels = non_max_suppression(labels, object_num, iou_threshold)
 
-np_img = cv2.imread('cat.jpg')
-resized_img = cv2.resize(np_img, (448, 448))
-np_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
+    #np_img = cv2.imread('cat.jpg')
+    #resized_img = cv2.resize(np_img, (448, 448))
+    #np_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
 
-for obj_num,object in enumerate(labels):
-    class_name = classes_name[object[4]]
-    print("Printing Classes: ",str(class_name))
-    cv2.rectangle(resized_img, (int(object[0]), int(object[1])), (int(object[2]), int(object[3])), (0, 0, 255))
-    cv2.putText(resized_img, class_name, (int(object[0]), int(object[1])), 2, 1.5, (0, 0, 255))
+    for obj_num,object in enumerate(labels):
+        class_name = classes_name[object[4]]
+        #print("Printing Classes: ",str(class_name))
+        cv2.rectangle(resized_img, (int(object[0]), int(object[1])), (int(object[2]), int(object[3])), (0, 0, 255))
+        cv2.putText(resized_img, class_name, (int(object[0]), int(object[1])), 2, 1.5, (0, 0, 255))
+        
+    cv2.imwrite(output_loc + "/" + img , resized_img)
+    #cv2.imwrite(img + 'out.jpg', resized_img)
 
-cv2.imwrite('cat_out.jpg', resized_img)
-
+#frames_to_video()
 sess.close()
+
